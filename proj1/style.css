@@ -29,11 +29,6 @@ h2 {
   padding-bottom: 0.25rem;
 }
 
-.text {
-  color: #777;
-  font-style: italic;
-}
-
 .text + .text {
   margin-top: 2rem;
 }
