@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CS180 project 2</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/contrib/auto-render.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>CS180 Proj 2  📸 📸 📸</h1>
+    <p>Fun with Filters and Frequencies!</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Part 1.1: Convolutions from Scratch</h2>
+      <p class="text">Both versions start by flipping the kernel, which is what makes this convolution instead of correlation (it matters here b/c flipping changes the sign for $D_x$ and $D_y$). Then I zero-pad each side by kernel_size // 2 so the output is the same size as the input. The four-loop version uses two loops over every output pixel and two more over the kernel entries, multiplying and adding one pixel at a time. The two-loop version keeps the outer loops, but grabs the whole window at once and computes np.sum(window * kernel) in one numpy call.</p>
+<pre><code>def pad_zeros(img, ph, pw):
+    h, w = img.shape
+    padded = np.zeros((h+ 2*ph, w + 2*pw))
+    padded[ph: ph + h, pw: pw + w] = img
+    return padded
+
+def convolution_four_loops(img, kernel):
+    kernel = np.flip(kernel)
+    kh, kw = kernel.shape
+    ph, pw = kh//2, kw // 2
+    padded = pad_zeros(img, ph, pw)
+    h, w = img.shape
+
+    out = np.zeros((h, w))
+    for i in range(h):
+        for j in range(w):
+            total = 0.0
+            for m in range(kh):
+                for n in range(kw):
+                    total += padded[i + m, j + n] * kernel[m, n]
+            out[i, j ] = total
+    return out
+
+def convolution_two_loops(img, kernel):
+    kernel = np.flip(kernel)
+    kh, kw = kernel.shape
+    ph, pw = kh//2, kw // 2
+    padded = pad_zeros(img, ph, pw)
+    h, w = img.shape
+
+    out = np.zeros((h, w))
+    for i in range(h):
+        for j in range(w):
+            window  = padded[i: i + kh, j: j + kw]
+            out[i, j] = np.sum(window * kernel)
+    return out</code></pre>
+      <p class="text">For the 9x9 box filter, two loops is about 9x faster than four loops (0.39s vs 3.61s), since numpy does all 81 multiplications at once in compiled code. For $D_x$ and $D_y$ it flips: four loops is actually faster (0.18s vs 0.38s), b/c with only 3 kernel entries, the overhead of calling numpy on every pixel outweighs what it saves. scipy beats both by 20 to 200x since it has no Python loops at all. Full numbers on the 600x450 selfie:</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Filter</th>
+            <th>Four loops</th>
+            <th>Two loops</th>
+            <th>scipy.signal.convolve2d</th>
+            <th>Max diff vs scipy</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>9x9 box</td>
+            <td>3.61s</td>
+            <td>0.39s</td>
+            <td>0.019s</td>
+            <td>~4.8e-13 (four loops), ~1.7e-13 (two loops)</td>
+          </tr>
+          <tr>
+            <td>D_x</td>
+            <td>0.18s</td>
+            <td>0.38s</td>
+            <td>0.0022s</td>
+            <td>0.0</td>
+          </tr>
+          <tr>
+            <td>D_y</td>
+            <td>0.20s</td>
+            <td>0.38s</td>
+            <td>0.0031s</td>
+            <td>0.0</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="text">For boundaries, I use zero padding, same as scipy's boundary='fill', fillvalue=0. You can actually see the effect of this in the box-blurred selfie below! There is a faint dark frame around the edges, as part of the 9x9 window falls on zeros near the border, dragging the average down.</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/selfie_gray.png" alt="selfie in grayscale">
+          <figcaption>Selfie (grayscale)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/selfie_box.png" alt="selfie with 9x9 box filter">
+          <figcaption>9x9 box filter</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/selfie_dx.png" alt="selfie with D_x">
+          <figcaption>D_x</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/selfie_dy.png" alt="selfie with D_y">
+          <figcaption>D_y</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Part 1.2: Finite Difference Operator</h2>
+      <p class="text">$D_x$ picks up vertical edges, which are the places where brightness changes from left to right. $D_y$ does the same for horizontal edges, where brightness changes from the top to bottom. Combining them gives the gradient magnitude, which is the edge strength in any direction regardless of orientation:
+
+$$G = \sqrt{\left(\frac{\partial I}{\partial x}\right)^2 + \left(\frac{\partial I}{\partial y}\right)^2}$$
+
+Additionally, the white line running around the border of the output is caused by the zero padding. This is where the jump from real image values down to 0 looks exactly like an edge to the filter.</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/cameraman.png" alt="cameraman">
+          <figcaption>Original</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/cameraman_gradient_magnitude.png" alt="gradient magnitude">
+          <figcaption>Gradient magnitude</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/cameraman_dx.png" alt="partial derivative in x">
+          <figcaption>Partial derivative in x</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/cameraman_dy.png" alt="partial derivative in y">
+          <figcaption>Partial derivative in y</figcaption>
+        </figure>
+      </div>
+      <p class="text">I tried a handful of thresholds: 50, 70, 73, 75, 78, 90. At 50, the grass texture shows up as white specks across the whole lawn (noise, not edges). At 90, real edges start disappearing, like the background buildings and parts of the tripod legs. 75 was the best tradeoff b/c the specks are almost entirely gone, and the man, camera, tripod, and buildings are all still visible. From this question, I learned that I can't fully catch every edge and remove all the noise at once.</p>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/cameraman_edges_50.png" alt="edges threshold 50">
+          <figcaption>Threshold 50</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/cameraman_edges_75.png" alt="edges threshold 75">
+          <figcaption>Threshold 75 (chosen)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/cameraman_edges_90.png" alt="edges threshold 90">
+          <figcaption>Threshold 90</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Part 1.3: Derivative of Gaussian (DoG) Filter</h2>
+      <p class="text">For the Gaussian, I used getGaussianKernel(11, 1.5) and took the outer product with its own transpose to get a 2D kernel. The size needs to be at least 6σ (9) to cover the whole bell curve, and odd so there's an actual center pixel (an even size shifts the result by half a pixel), so I went with 11. Blurring first removes the grass noise entirely, and the edges come out thicker, smoother, and more continuous, so the tripod and outline no longer break up into little pieces. Blurring also weakens the gradients (the max drops from about 360 to 216), so I lowered the threshold to 30.</p>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/cameraman_blurred.png" alt="blurred cameraman">
+          <figcaption>Blurred (11x11 gaussian, sigma 1.5)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/blurred_gradient_magnitude.png" alt="blurred gradient magnitude">
+          <figcaption>Gradient magnitude</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/blurred_edges30.png" alt="blurred edges threshold 30">
+          <figcaption>Threshold 30</figcaption>
+        </figure>
+      </div>
+      <p class="text">The DoG filters are the Gaussian convolved with $D_x$ and $D_y$ (in "full" mode so neither filter gets cut off). Each one looks like a bright blob next to a dark blob, basically a smooth version of [1, 0, -1]. Now edge detection is a single convolution on the original image, instead of blurring and then taking the derivative separately.</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/dog_x_filter.png" alt="DoG x filter">
+          <figcaption>DoG filter (x)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/dog_y_filter.png" alt="DoG y filter">
+          <figcaption>DoG filter (y)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/dog_gradient_magnitude.png" alt="DoG gradient magnitude">
+          <figcaption>DoG gradient magnitude</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/dog_edges_30.png" alt="DoG edges threshold 30">
+          <figcaption>DoG threshold 30</figcaption>
+        </figure>
+      </div>
+      <p class="text">To verify, I compared the two outputs: the max difference is 2.56e-13 ignoring the 1-pixel border, so they're the same, b/c convolution is associative: $(I * G) * D_x = I * (G * D_x)$. The 93.58 difference over the whole image comes only from that border, since blurring first cuts the image off at its edge before $D_x$ is applied. Compared to plain finite differences, DoG gives much less noise and cleaner edges, b/c it compares weighted neighborhoods instead of single pixels.</p>
+    </section>
+
+    <section>
+      <h2>Part 2.1: Image "Sharpening"</h2>
+      <p class="text">A Gaussian blur is a low-pass filter, so image minus blur gives you the high frequencies (edges and texture), shown in the "high frequencies" image below. Sharpening adds some multiple of those high frequencies back on top of the original:
+
+$$f + \alpha(f - f * g)$$
+
+which folds into a single filter,
+
+$$f * \big((1+\alpha)e - \alpha g\big)$$
+
+where $e$ is the impulse: a single 1 in the middle, zero everywhere else. I used size 9, σ 1.5, applied separately to each color channel, with mirror padding at the edges to avoid a bright border artifact.</p>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/taj.jpg" alt="taj original">
+          <figcaption>Original</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/taj_blurred.png" alt="taj blurred">
+          <figcaption>Blurred</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/taj_details.png" alt="taj high frequencies">
+          <figcaption>High frequencies</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/taj_sharpened_alpha1.png" alt="taj alpha 1">
+          <figcaption>Sharpened, alpha 1</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/taj_sharpened_alpha2.png" alt="taj alpha 2">
+          <figcaption>Sharpened, alpha 2</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/taj_sharpened_alpha3.png" alt="taj alpha 3">
+          <figcaption>Sharpened, alpha 3</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/taj_sharpened_alpha4.png" alt="taj alpha 4">
+          <figcaption>Sharpened, alpha 4</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/taj_sharpened_alpha5.png" alt="taj alpha 5">
+          <figcaption>Sharpened, alpha 5</figcaption>
+        </figure>
+      </div>
+      <p class="text">The Capitol photo is my own DSLR shot, with a shallow depth of field (sharp foreground & soft background). Sharpening makes the grass, flowers, and ledge texture noticeably crisper, and the dome's columns become more visible but stay soft, b/c sharpening can't add detail the lens never captured. Across α, 1 is subtle, 2 looks best, and by 3-5 halos appear around edges, the sky turns grainy, and the foliage looks crunchy, since the noise gets amplified too.</p>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/capitol.jpeg" alt="capitol original">
+          <figcaption>Original</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/capitol_blurred.png" alt="capitol blurred">
+          <figcaption>Blurred</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/capitol_details.png" alt="capitol high frequencies">
+          <figcaption>High frequencies</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/capitol_sharpened_alpha1.png" alt="capitol alpha 1">
+          <figcaption>Sharpened, alpha 1</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/capitol_sharpened_alpha2.png" alt="capitol alpha 2">
+          <figcaption>Sharpened, alpha 2</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/capitol_sharpened_alpha3.png" alt="capitol alpha 3">
+          <figcaption>Sharpened, alpha 3</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/capitol_sharpened_alpha4.png" alt="capitol alpha 4">
+          <figcaption>Sharpened, alpha 4</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/capitol_sharpened_alpha5.png" alt="capitol alpha 5">
+          <figcaption>Sharpened, alpha 5</figcaption>
+        </figure>
+      </div>
+      <p class="text">I reused my selfie from Part 1.1, this time in color, as the sharp image. I blurred it with the same Gaussian, then re-sharpened it at a few different α.</p>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/eval_original.png" alt="sharp original">
+          <figcaption>Original</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/eval_blurred.png" alt="blurred">
+          <figcaption>Blurred</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/eval_resharpened_alpha1.png" alt="resharpened alpha 1">
+          <figcaption>Resharpened, alpha 1</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/eval_resharpened_alpha2.png" alt="resharpened alpha 2">
+          <figcaption>Resharpened, alpha 2</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/eval_resharpened_alpha5.png" alt="resharpened alpha 5">
+          <figcaption>Resharpened, alpha 5</figcaption>
+        </figure>
+      </div>
+      <p class="text">Mean absolute difference from the original: blurred 12.96, resharpened α=1 11.69, α=2 11.10 (closest), α=5 12.85 (worse again, overshooting). The outlines look crisp again, but the fine texture, like the leaves and my hair strands, doesn't come back. Sharpening can only boost the high frequencies that survived the blur, & it can't recreate what the blur destroyed.</p>
+    </section>
+
+    <section>
+      <h2>Part 2.2: Hybrid Images</h2>
+      <p class="text">To make a hybrid image, I low-pass (Gaussian blur) the "far" image and high-pass (image minus blur) the "close" image, then add them together. Up close, the high frequencies dominate; from far away, only the low frequencies survive. For alignment, I used the provided starter code: I click both eyes on each image, and it shifts, scales, & rotates them so the eyes line up, then crops both to the same size (the black corners come from that rotation). Everything's done in grayscale (except the color versions at the end), and the blur uses FFT convolution for speed, with mirror padding at the edges.</p>
+
+      <p class="text">Glinda + Elphaba is my favorite result b/c I love musicals!! Elphaba is the low-pass image b/c her hat and dark outfit are big, bold shapes that survive blurring, while Glinda's lashes and hair are fine detail that suits the high-pass. I started at σ_high 6 / σ_low 8, and Glinda overpowered everything, with Elphaba barely visible. Lowering σ_high to 3 keeps only Glinda's sharpest edges, so Elphaba's hat and silhouette show through from far away. In the FFTs, both inputs have energy at all frequencies, the low-pass keeps only the bright center (the low frequencies), the high-pass removes the center, and the hybrid has both.</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/glinda.png" alt="glinda original">
+          <figcaption>Original (high frequencies)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/elphaba.png" alt="elphaba original">
+          <figcaption>Original (low frequencies)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glinda_elphaba_aligned_high.png" alt="glinda aligned">
+          <figcaption>Aligned</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glinda_elphaba_aligned_low.png" alt="elphaba aligned">
+          <figcaption>Aligned</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glinda_elphaba_high.png" alt="glinda high pass">
+          <figcaption>High-pass (sigma 3)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glinda_elphaba_low.png" alt="elphaba low pass">
+          <figcaption>Low-pass (sigma 8)</figcaption>
+        </figure>
+      </div>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/glinda_elphaba_fft_input_high.png" alt="fft glinda">
+          <figcaption>FFT: Glinda</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glinda_elphaba_fft_input_low.png" alt="fft elphaba">
+          <figcaption>FFT: Elphaba</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glinda_elphaba_fft_high.png" alt="fft high pass">
+          <figcaption>FFT: high-pass</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glinda_elphaba_fft_low.png" alt="fft low pass">
+          <figcaption>FFT: low-pass</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glinda_elphaba_fft_hybrid.png" alt="fft hybrid">
+          <figcaption>FFT: hybrid</figcaption>
+        </figure>
+      </div>
+      <figure class="single">
+        <img src="assets/glinda_elphaba_hybrid.png" alt="glinda elphaba hybrid">
+        <figcaption>Hybrid</figcaption>
+      </figure>
+
+      <p class="text">This was the provided sample pair, σ 6 / 8. The cat's whiskers and fur are strong fine detail, so it still reads clearly up close even at σ 6. Aligning the eyes rotated the cat to level its eyes with Derek's, which is what caused the black wedge in the corner.</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/nutmeg.jpg" alt="nutmeg original">
+          <figcaption>Original (high frequencies)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/DerekPicture.jpg" alt="derek original">
+          <figcaption>Original (low frequencies)</figcaption>
+        </figure>
+      </div>
+      <figure class="single">
+        <img src="assets/derek_nutmeg_hybrid.png" alt="derek nutmeg hybrid">
+        <figcaption>Hybrid</figcaption>
+      </figure>
+
+      <p class="text">I flipped Rumi horizontally so both faces point the same way, and the matching purple backgrounds end up helping a lot. σ 3 / 8. Their heads are tilted differently though, so while the eyes line up, the mouths and chins are slightly off.</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/rumi.png" alt="rumi original">
+          <figcaption>Original (high frequencies)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/jinu.png" alt="jinu original">
+          <figcaption>Original (low frequencies)</figcaption>
+        </figure>
+      </div>
+      <figure class="single">
+        <img src="assets/rumi_jinu_hybrid.png" alt="rumi jinu hybrid">
+        <figcaption>Hybrid</figcaption>
+      </figure>
+
+      <p class="text">Color barely shows up in the high frequencies (it lives in the low ones instead), so it strengthens the Glinda/Elphaba effect but mostly just looks pretty on Rumi/Jinu, who already share a purple palette.</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/glinda_elphaba_color_hybrid.png" alt="glinda elphaba color hybrid">
+          <figcaption>Glinda + Elphaba in color</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/rumi_jinu_color_hybrid.png" alt="rumi jinu color hybrid">
+          <figcaption>Rumi + Jinu in color</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Part 2.3: Gaussian and Laplacian Stacks</h2>
+      <p class="text">For the Gaussian stack, level 0 is the original, and each next level blurs the previous one with the same Gaussian (σ 6): 5 levels, no downsampling, each color channel separately, no built-in pyramid functions. The Laplacian stack is $L_i = G_i - G_{i+1}$, with the blurriest Gaussian level as the last level, so adding every level back together gives the original exactly. Levels 1-3 end up looking pretty similar, b/c repeating the same blur adds less and less new blur each time (a pyramid effectively doubles the blur every level instead).</p>
+      <figure>
+        <img src="assets/apple_gaussian_stack.png" alt="apple gaussian stack">
+        <figcaption>Apple: Gaussian stack</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/apple_laplacian_stack.png" alt="apple laplacian stack">
+        <figcaption>Apple: Laplacian stack</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/orange_gaussian_stack.png" alt="orange gaussian stack">
+        <figcaption>Orange: Gaussian stack</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/orange_laplacian_stack.png" alt="orange laplacian stack">
+        <figcaption>Orange: Laplacian stack</figcaption>
+      </figure>
+      <p class="text">The mask is just the left half set to 1, with its own Gaussian stack. Each row shows levels 0, 2, 4 of apple × mask, orange × (1 − mask), and their sum, and the last row adds all the levels together. I went with σ 6 b/c σ 2 left level 4 too sharp, which made the final seam obvious.</p>
+      <figure class="single">
+        <img src="assets/oraple_figure_3_42.png" alt="figure 3.42 recreation">
+        <figcaption>Figure 3.42 recreation: levels 0, 2, 4, and the full result</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Part 2.4: Multiresolution Blending</h2>
+      <p class="text">At each level, I compute $L_{\text{apple}} \cdot G_{\text{mask}} + L_{\text{orange}} \cdot (1-G_{\text{mask}})$, then add all the levels together. The mask gets blurrier at coarser levels, so big features like color and shading blend over a wide area while fine detail switches over a narrow one, which gives a smooth seam. Without the blurred mask (the method on page 230 of the paper), an abrupt seam would stay visible at every level.</p>
+      <figure class="single">
+        <img src="assets/oraple.png" alt="oraple">
+        <figcaption>Oraple</figcaption>
+      </figure>
+
+      <p class="text">I used a circle mask, radius 130, drawn with cv2.circle, and resized the cookie to match the moon's size. There's a tradeoff I noticedin the radius: 120 left a thicker moon rim, while 130 fills more of the moon but adds a faint white glow, since at coarse levels the blurred mask reaches past the cookie into its white marble-like background.</p>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/cookie.jpg" alt="cookie">
+          <figcaption>Cookie</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/moon.jpg" alt="moon">
+          <figcaption>Moon</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/mask_cookie_moon.png" alt="circle mask">
+          <figcaption>Circle mask</figcaption>
+        </figure>
+      </div>
+      <figure class="single">
+        <img src="assets/blend_cookie_moon.png" alt="cookie moon blend">
+        <figcaption>Cookie moon</figcaption>
+      </figure>
+      <figure class="single">
+        <img src="assets/cookie_moon_laplacian_figure.png" alt="cookie moon laplacian stack">
+        <figcaption>Laplacian stack of the cookie moon: levels 0, 2, 4, and the full result</figcaption>
+      </figure>
+      <p class="text">Left is the cookie masked, middle is the moon masked (the ring), and right is the two combined. The mask edge is sharp at level 0 and very soft by level 4.</p>
+
+      <p class="text">The cookie and moon didn't blend that well with a straight seam, as I noticed that the colors, textures, and backgrounds (white vs black) are too different, and at the finest level the mask isn't blurred, so the texture switches right at the line. Blending smooths the transition, but it doesn't hide content that different. So I tried lemon/lime instead, which came out way better, probably because of matching white backgrounds and similar peel texture. The fruits still aren't the exact same size or shape (the lime is a bit bigger in its photo), which shows up as small steps at the top and bottom of the seam, but still better!</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/blend_cookie_moon_seam.png" alt="half cookie half moon">
+          <figcaption>Half cookie, half moon</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/blend_lemon_lime.png" alt="lemon lime blend">
+          <figcaption>Lemon + lime</figcaption>
+        </figure>
+      </div>
+      <div class="gallery">
+        <figure>
+          <img src="assets/lemon.png" alt="lemon">
+          <figcaption>Lemon</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/lime.png" alt="lime">
+          <figcaption>Lime</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Most Important Thing I Learned</h2>
+      <p class="text">For hybrids and blends, I learned that choosing the images matters as much as the algorithm. Matching backgrounds, palettes, and shapes did more for the final result than any parameter I tuned :0</p>
+    </section>
+
+  </main>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      renderMathInElement(document.body, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false }
+        ]
+      });
+    });
+  </script>
+</body>
+</html>
