@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CS180 project 3 - Fun with Flow Models</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/contrib/auto-render.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>CS180 Proj 3  📸 📸 📸</h1>
+    <p>Fun with Flow Models</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Part A: Exploring the Power of Flow Models</h2>
+
+      <h3>Setup</h3>
+      <p class="text">For this part, I used the pretrained PixNerd-XXL-P16-T2I model, which generates and edits 512 × 512 images. For now, assume that I use seed 180, an Euler step size of 0.02, and the prompt "a high quality photo." One thing to keep in mind throughout is that t = 0 is pure noise and t = 1 is the clean image, so moving forward in time means moving toward the picture.</p>
+
+      <h3>1. Visualizing Training and Sampling</h3>
+
+      <h4>1.1 Constructing Noisy Training Inputs</h4>
+      <p class="text">For this section I used a photo I took of a duck standing on a fountain. To make the noisy versions, I blend the image with Gaussian noise using the formula below.</p>
+
+      <p class="text">$$x_t = (1 - t)\,\epsilon + t\,x_1, \qquad \epsilon \sim \mathcal{N}(0, I)$$</p>
+
+      <p class="text">I used the same noise for t = 0.25, 0.50, and 0.75, and kept these three images for the next few sections.</p>
+
+      <figure>
+        <img src="assets/duck_noising_construction.png" alt="duck at t = 0.25, 0.50, and 0.75 compared to the original">
+        <figcaption>Original vs. t = 0.25, 0.50, 0.75</figcaption>
+      </figure>
+
+      <p class="text">At t = 0.25 you can barely tell there's a duck at all. By t = 0.50 the fountain and the duck start to show up, and at t = 0.75 it really just looks like a grainy version of my photo.</p>
+
+      <h4>1.2 Classical Denoising</h4>
+      <p class="text">Before using the model, I tried the classic approach of blurring the noise away. Since the image gets dimmed by t, I divide by t first and then apply a Gaussian blur.</p>
+
+      <p class="text">$$\hat{x}_1^{\text{blur}} = G_\sigma\!\left(\frac{x_t}{t}\right)$$</p>
+
+      <p class="text">I tried σ values of 1, 2, 4, 8, and 16, and kept whichever one had the lowest error compared to the original (σ = 8, 4, and 2 for the three times).</p>
+
+      <figure>
+        <img src="assets/duck_blur_compare_t025.png" alt="noisy vs best blur denoising at t = 0.25">
+        <figcaption>t = 0.25, best blur σ = 8</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/duck_blur_compare_t050.png" alt="noisy vs best blur denoising at t = 0.50">
+        <figcaption>t = 0.50, best blur σ = 4</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/duck_blur_compare_t075.png" alt="noisy vs best blur denoising at t = 0.75">
+        <figcaption>t = 0.75, best blur σ = 2</figcaption>
+      </figure>
+
+      <p class="text">The blur does get rid of the noise, but it takes all the detail with it, so the feathers and water streams are completely gone. At t = 0.25 the duck turns into a colorful smudge, which shows that blurring can't bring back anything the noise has already covered up.</p>
+
+      <h4>1.3 One-Step Denoising</h4>
+      <p class="text">Next, I used the flow model itself. It predicts which direction the image should move, and I jump straight to the end in one step.</p>
+
+      <p class="text">$$\hat{x}_1 = x_t + (1 - t)\,v_\theta(x_t, t, c)$$</p>
+
+      <figure>
+        <img src="assets/duck_onestep_compare_t025.png" alt="original vs noisy vs one-step estimate at t = 0.25">
+        <figcaption>t = 0.25</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/duck_onestep_compare_t050.png" alt="original vs noisy vs one-step estimate at t = 0.50">
+        <figcaption>t = 0.50</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/duck_onestep_compare_t075.png" alt="original vs noisy vs one-step estimate at t = 0.75">
+        <figcaption>t = 0.75</figcaption>
+      </figure>
+
+      <p class="text">This worked so much better than blurring. Even at t = 0.25 you can see the duck, the fountain, and the bushes behind it, although everything looks soft and a little washed out. I think this happens because one big jump tends to land on an "average" of all the images that could be hiding under that much noise.</p>
+
+      <h4>1.4 Visualizing Velocity</h4>
+      <p class="text">Because I kept the exact noise from 1.1, I know precisely what change would turn each noisy image back into my photo, so I could line that up against the change the model actually predicts.</p>
+
+      <p class="text">$$\Delta_{\text{pred}} = (1 - t)\,v_\theta(x_t, t, c), \qquad \Delta_{\text{gt}} = x_1 - x_t$$</p>
+
+      <p class="text">The error heatmap shows, for each pixel, how far off the prediction is (averaged across the red, green, and blue channels).</p>
+
+      <p class="text">$$E_t = \sqrt{\operatorname{mean}_{\text{RGB}}\left[(\Delta_{\text{pred}} - \Delta_{\text{gt}})^2\right]}$$</p>
+
+      <figure>
+        <img src="assets/duck_velocity_t025.png" alt="noisy image, predicted update, ground-truth update, and error at t = 0.25">
+        <figcaption>t = 0.25</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/duck_velocity_t050.png" alt="noisy image, predicted update, ground-truth update, and error at t = 0.50">
+        <figcaption>t = 0.50</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/duck_velocity_t075.png" alt="noisy image, predicted update, ground-truth update, and error at t = 0.75">
+        <figcaption>t = 0.75</figcaption>
+      </figure>
+
+      <p class="text">The error is biggest at t = 0.25 and gets smaller as t increases, which makes sense since there's more of the real image to work with. Most of the error lands on edges and textures, like the duck, the rim of the fountain, and the water, while the blurry background is easy for the model to get right.</p>
+
+      <h4>1.5 Iterative Denoising with Euler Sampling</h4>
+      <p class="text">Instead of one big jump, Euler sampling takes lots of small steps and asks the model for a new direction each time.</p>
+
+      <p class="text">$$x_{t+h} = x_t + h\,v_\theta(x_t, t, c)$$</p>
+
+      <p class="text">Starting from my t = 0.50 image, that's 25 steps of size 0.02.</p>
+
+      <figure>
+        <img src="assets/duck_euler_sequence.png" alt="euler sampling from t = 0.50 to t = 1.00 in steps of 0.02">
+        <figcaption>Euler sampling from t = 0.50 to 1.00 (every 5th update is t = 0.60, 0.70, 0.80, 0.90)</figcaption>
+      </figure>
+
+      <p class="text">You can watch the grain slowly fade while the feathers and water come back into focus. Here are all three methods side by side, starting from the same noisy image.</p>
+
+      <figure>
+        <img src="assets/duck_method_comparison.png" alt="original vs blur vs one-step vs euler denoising">
+        <figcaption>Original vs. blur vs. one-step vs. Euler</figcaption>
+      </figure>
+
+      <p class="text">Euler is clearly the sharpest, but surprisingly its error (0.0149) is actually a little higher than one-step's (0.0123), with blur at 0.0244. I think this is because Euler invents realistic detail that doesn't match my photo pixel for pixel, so a lower error doesn't always mean a better looking image.</p>
+
+      <h4>1.6 Generating Images from Noise</h4>
+      <p class="text">The same sampler can also make images completely from scratch. I started from pure noise with seeds 180 through 184 and took 50 steps without any extra guidance.</p>
+
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/sample_seed180.png" alt="sample from seed 180">
+          <figcaption>Seed 180</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_seed181.png" alt="sample from seed 181">
+          <figcaption>Seed 181</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_seed182.png" alt="sample from seed 182">
+          <figcaption>Seed 182</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_seed183.png" alt="sample from seed 183">
+          <figcaption>Seed 183</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_seed184.png" alt="sample from seed 184">
+          <figcaption>Seed 184</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">All five came out as people, even though the prompt never asked for one, and honestly they're pretty rough (some of the faces are weirdly shaped and blurred). It seems like the vague prompt leaves the model unsure of what to draw, so it falls back on portraits.</p>
+
+      <h3>2. Conditional Generation and Guidance</h3>
+
+      <h4>2.1 Classifier-Free Guidance (CFG)</h4>
+      <p class="text">To make the prompt matter more, I run the model twice at every step, once with the prompt ($v_c$) and once with an empty prompt ($v_u$), and then push the image further in the direction the prompt adds.</p>
+
+      <p class="text">$$v_{\text{cfg}} = v_c + w\,(v_c - v_u), \qquad w = 7$$</p>
+
+      <p class="text">I reused the same seeds as 1.6, so each pair below starts from the exact same noise.</p>
+
+      <div class="gallery">
+        <figure>
+          <img src="assets/sample_seed180.png" alt="unguided sample from seed 180">
+          <figcaption>Unguided, seed 180</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_cfg_seed180.png" alt="cfg sample from seed 180">
+          <figcaption>CFG, seed 180</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_seed181.png" alt="unguided sample from seed 181">
+          <figcaption>Unguided, seed 181</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_cfg_seed181.png" alt="cfg sample from seed 181">
+          <figcaption>CFG, seed 181</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_seed182.png" alt="unguided sample from seed 182">
+          <figcaption>Unguided, seed 182</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_cfg_seed182.png" alt="cfg sample from seed 182">
+          <figcaption>CFG, seed 182</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_seed183.png" alt="unguided sample from seed 183">
+          <figcaption>Unguided, seed 183</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_cfg_seed183.png" alt="cfg sample from seed 183">
+          <figcaption>CFG, seed 183</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_seed184.png" alt="unguided sample from seed 184">
+          <figcaption>Unguided, seed 184</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/sample_cfg_seed184.png" alt="cfg sample from seed 184">
+          <figcaption>CFG, seed 184</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">The difference is huge, and every seed turns into a clean, well-lit studio portrait with sharp features. The downside is that they all look really similar, since guidance doubles down on whatever the model thinks "a high quality photo" means (which apparently is a centered portrait).</p>
+
+      <h3>3. Creative Applications</h3>
+      <p class="text">Everything in this section uses guidance with w = 7. For the edits, I used seed 180 and the starting times 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, and 0.50.</p>
+
+      <h4>3.1 Image-to-Image Editing</h4>
+      <p class="text">To edit an image, I add noise up to a starting time and then let the model fill the rest back in.</p>
+
+      <p class="text">$$x_{t_{\text{start}}} = (1 - t_{\text{start}})\,\epsilon + t_{\text{start}}\,x_1$$</p>
+
+      <p class="text">Starting earlier gives the model more freedom to change things, and starting later keeps the result closer to the original.</p>
+
+      <p class="text"><strong>Campanile</strong></p>
+      <figure>
+        <img src="assets/campanile_edit_sequence.png" alt="campanile edited at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text"><strong>Duck on a fountain</strong></p>
+      <figure>
+        <img src="assets/duck_edit_sequence.png" alt="duck edited at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text"><strong>Egret on a cliff</strong></p>
+      <figure>
+        <img src="assets/egret_edit_sequence.png" alt="egret edited at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text">At the earliest times only the colors survive, so the model draws something unrelated (the duck turns into portraits of people, and the egret into a computer desk and then a blurry city). The fountain becomes folds of a blanket for a while, and by 0.50 both of my photos are basically back to normal. The bird is so small in the frame that it's the very last thing to reappear.</p>
+
+      <h5>Editing Hand-Drawn and Web Images</h5>
+      <p class="text">I tried the same thing on a pixel-art cat I found online and two drawings I made myself (a vase of flowers and an orange cat).</p>
+
+      <p class="text"><strong>Web image, pixel-art cat</strong></p>
+      <figure>
+        <img src="assets/cat_pixelart_edit_sequence.png" alt="pixel-art cat edited at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text"><strong>My drawing, flower vase</strong></p>
+      <figure>
+        <img src="assets/flower_vase_edit_sequence.png" alt="flower vase edited at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text"><strong>My drawing, orange cat</strong></p>
+      <figure>
+        <img src="assets/orange_cat_drawing_edit_sequence.png" alt="orange cat drawing edited at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text">What surprised me is that the drawings don't all behave the same way. After about t = 0.14, the flower vase actually turns into a real-looking photo of a vase with flowers, not just a nicer sketch. My line-drawn cat never recovers like that: it falls apart into orange squiggles at 0.10 and stays a sketch. The bold pixel cat holds its shape from 0.06 onward, which I think is because thick, solid shapes survive the noise better than thin lines.</p>
+
+      <h4>3.2 Text-Guided Image Editing</h4>
+      <p class="text">This time I used my own prompts instead of "a high quality photo."</p>
+
+      <p class="text"><strong>Campanile to Eiffel Tower, with "a photograph of the eiffel tower in Paris"</strong></p>
+      <figure>
+        <img src="assets/campanile_eiffel_sequence.png" alt="campanile to eiffel tower at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text"><strong>Duck to rubber duck, with "a rubber duck in a bathtub"</strong></p>
+      <figure>
+        <img src="assets/duck_rubberduck_sequence.png" alt="duck to rubber duck at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text"><strong>Egret to lighthouse, with "A lighthouse on a cliff by the ocean"</strong></p>
+      <figure>
+        <img src="assets/egret_lighthouse_sequence.png" alt="egret to lighthouse at increasing starting times">
+        <figcaption>Original, then edits starting at t = 0.02, 0.04, 0.06, 0.10, 0.14, 0.25, 0.50</figcaption>
+      </figure>
+
+      <p class="text">The Eiffel Tower starts out complete (sitting over the Seine) and slowly morphs back into the Campanile, and at 0.10 and 0.14 it's a really fun hybrid with the iron lattice wrapped around the Campanile's tower and belfry. The rubber duck gradually turns back into my real duck as the starting time increases. The lighthouse is my favorite though, because it shrinks and slides into exactly where the egret was standing until it's a tiny white tower the same size as the bird.</p>
+
+      <h4>3.3 Visual Anagrams</h4>
+      <p class="text">A visual anagram is one image that shows one thing upright and something else when you flip it upside down. At each step, I average the direction for the upright image with the direction for the flipped image (flipped back so they line up).</p>
+
+      <p class="text">$$v = \tfrac{1}{2}\Big(v_{\text{cfg}}(x_t, t, p_a) + F\big(v_{\text{cfg}}(F(x_t), t, p_b)\big)\Big)$$</p>
+
+      <p class="text"><strong>Castle and knight (lithograph, seed 181)</strong></p>
+      <figure>
+        <img src="assets/anagram_castle_knight.png" alt="castle and knight anagram, upright and rotated">
+        <figcaption>Upright (castle) and rotated (knight)</figcaption>
+      </figure>
+
+      <p class="text"><strong>Forest and bear (oil painting, seed 180)</strong></p>
+      <figure>
+        <img src="assets/anagram_forest_bear.png" alt="forest and bear anagram, upright and rotated">
+        <figcaption>Upright (forest) and rotated (bear)</figcaption>
+      </figure>
+
+      <p class="text">The castle and knight came out the best, since the knight becomes the castle and his helmet becomes a tower. The forest and bear works too, with the bear's snout turning into a path through a dark forest. It took a few failed tries to get here (a tiger, a zebra, and a crab), and I learned that strong subjects like animals tend to take over vaguer ones like "a forest," and that a crab looks pretty much the same upside down anyway.</p>
+
+      <h4>3.4 Hybrid Images</h4>
+      <p class="text">For hybrid images, one prompt controls the big shapes you see from far away, and the other controls the fine details you see up close.</p>
+
+      <p class="text">$$v = G_\sigma(v_a) + v_b - G_\sigma(v_b)$$</p>
+
+      <p class="text"><strong>Coffee and mountain (seed 181), with "a lithograph of a cup of coffee" from far away and "a lithograph of a mountain" up close</strong></p>
+      <div class="hybrid-pair">
+        <figure class="close">
+          <img src="assets/hybrid_coffee_mountain_full.png" alt="coffee and mountain hybrid, viewed close up">
+          <figcaption>Close: a lithograph of a mountain</figcaption>
+        </figure>
+        <figure class="distant">
+          <img src="assets/hybrid_coffee_mountain_small.png" alt="coffee and mountain hybrid, viewed from a distance">
+          <figcaption>Distant: a lithograph of a cup of coffee</figcaption>
+        </figure>
+      </div>
+
+      <p class="text"><strong>Spaceship and Milky Way (seed 180), with "a lithograph of a spaceship" from far away and "a lithograph of the milky way" up close</strong></p>
+      <div class="hybrid-pair">
+        <figure class="close">
+          <img src="assets/hybrid_spaceship_milkyway_full.png" alt="spaceship and milky way hybrid, viewed close up">
+          <figcaption>Close: a lithograph of the milky way</figcaption>
+        </figure>
+        <figure class="distant">
+          <img src="assets/hybrid_spaceship_milkyway_small.png" alt="spaceship and milky way hybrid, viewed from a distance">
+          <figcaption>Distant: a lithograph of a spaceship</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">The coffee one worked really well. Up close it's snowy peaks over a bank of clouds, but when you shrink it down it's clearly a cup of coffee, and one of the ridges even becomes the handle. The spaceship is a lot subtler, since it looks like a galaxy up close and a flying saucer from far away (and those two already have pretty similar shapes).</p>
+    </section>
+
+    <section>
+      <h2>Part B: Flow Matching on MNIST</h2>
+      <p class="text">In Part B, I trained my own models on MNIST from scratch, starting with a simple denoiser and working up to a model that can generate whichever digit I ask for.</p>
+
+      <h3>1. Training a Single-Step Denoising UNet</h3>
+
+      <h4>1.1 Implementing the UNet</h4>
+      <p class="text">The UNet shrinks the image down (28 to 14 to 7 to a single pixel) and then builds it back up, with skip connections that carry the fine details across so they don't get lost along the way.</p>
+
+      <figure class="single">
+        <img src="assets/figure1_unconditional_unet.png" alt="unconditional UNet architecture">
+        <figcaption>Figure 1: Unconditional UNet</figcaption>
+      </figure>
+      <figure class="single">
+        <img src="assets/figure2_unet_operations.png" alt="UNet operations">
+        <figcaption>Figure 2: UNet operations</figcaption>
+      </figure>
+
+      <h4>1.2 Using the UNet to Train a Denoiser</h4>
+      <p class="text">To train it, I add noise to clean digits and teach the UNet to remove it.</p>
+
+      <p class="text">$$z = x + \sigma\epsilon, \qquad L = \mathbb{E}_{z,x}\,\lVert D_\theta(z) - x \rVert^2$$</p>
+
+      <p class="text">Here's what the digits look like at different noise levels, going from σ = 0 at the top to σ = 1.0 at the bottom.</p>
+
+      <figure class="single">
+        <img src="assets/noising_visualization.png" alt="digits at increasing noise levels">
+        <figcaption>Digits at increasing noise levels (σ = 0 to 1.0)</figcaption>
+      </figure>
+
+      <h5>1.2.1 Training</h5>
+      <p class="text">I trained for 5 epochs at σ = 0.5, with D = 128, a batch size of 256, and Adam at a learning rate of 1e-4 (adding fresh noise to every batch).</p>
+
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/denoise_loss.png" alt="denoiser training loss curve">
+          <figcaption>Training loss</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/denoise_epoch1.png" alt="denoiser results after epoch 1">
+          <figcaption>Epoch 1</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/denoise_epoch5.png" alt="denoiser results after epoch 5">
+          <figcaption>Epoch 5</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">The loss drops really quickly, and the digits are already readable after the first epoch. By epoch 5 they're just a bit sharper.</p>
+
+      <h5>1.2.2 Out-of-Distribution Testing</h5>
+      <p class="text">Since the model only ever trained on σ = 0.5, I wanted to see how it handles other noise levels.</p>
+
+      <figure class="single">
+        <img src="assets/denoise_ood_testing.png" alt="denoiser out-of-distribution testing">
+        <figcaption>Out-of-distribution noise levels</figcaption>
+      </figure>
+
+      <p class="text">It does fine up to σ = 0.6, but at 0.8 it starts making things up (one of the 2s turns into an 8), and at 1.0 the digits fall apart into scribbles.</p>
+
+      <h5>1.2.3 Denoising Pure Noise</h5>
+      <p class="text">Next, I tried training the denoiser on pure noise, with no digit hidden inside at all, to see if it could create digits from nothing.</p>
+
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/pure_noise_loss.png" alt="pure noise training loss curve">
+          <figcaption>Training loss</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/pure_noise_epoch1.png" alt="pure noise results after epoch 1">
+          <figcaption>Epoch 1</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/pure_noise_epoch5.png" alt="pure noise results after epoch 5">
+          <figcaption>Epoch 5</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">Every output ends up as the same blurry ghost that looks like a 0, 3, and 8 mashed together. This happens because the noise doesn't tell the model anything about which digit to draw, so with an MSE loss its best guess is just the average of all the digits it has seen.</p>
+
+      <p class="text">$$D^*(z) = \mathbb{E}[x]$$</p>
+
+      <p class="text">So one-step denoising can't really generate new images, which is where flow matching comes in.</p>
+
+      <h3>2. Training a Flow Matching Model</h3>
+      <p class="text">Instead of making one big jump, flow matching teaches the model to walk from noise to a digit in lots of small steps.</p>
+
+      <p class="text">$$x_t = (1 - t)\,x_0 + t\,x_1, \qquad L = \mathbb{E}\,\lVert (x_1 - x_0) - u_\theta(x_t, t) \rVert^2$$</p>
+
+      <h4>2.1 Adding Time Conditioning to UNet</h4>
+      <p class="text">The model needs to know how noisy its input is, so I feed in the time t through two small fully connected blocks that scale the UNet's features.</p>
+
+      <figure class="single">
+        <img src="assets/figure4_conditioned_unet.png" alt="time-conditioned UNet architecture">
+        <figcaption>Figure 4: Conditioned UNet</figcaption>
+      </figure>
+
+      <h4>2.2 Training the UNet</h4>
+      <p class="text">I trained for 10 epochs with D = 64, a batch size of 64, and Adam starting at 1e-2 with an exponential learning rate scheduler.</p>
+
+      <figure class="single">
+        <img src="assets/time_loss.png" alt="time-conditioned training loss curve">
+        <figcaption>Training loss</figcaption>
+      </figure>
+
+      <p class="text">The loss drops almost right away and then slowly keeps creeping down.</p>
+
+      <h4>2.3 Sampling from the UNet</h4>
+      <p class="text">To generate digits, I start from noise and take 50 small steps, using the same seed each time so the epochs are easy to compare.</p>
+
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/time_epoch1.png" alt="time-conditioned samples after epoch 1">
+          <figcaption>Epoch 1</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/time_epoch5.png" alt="time-conditioned samples after epoch 5">
+          <figcaption>Epoch 5</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/time_epoch10.png" alt="time-conditioned samples after epoch 10">
+          <figcaption>Epoch 10</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">Epoch 1 is mostly scribbles, epoch 5 is mostly real digits, and by epoch 10 they're pretty legible, with a few weird ones (one of them looks like both a 4 and a K). Since the model has no say in which digit it draws, some end up somewhere in between.</p>
+
+      <h4>2.4 Adding Class Conditioning to UNet</h4>
+      <p class="text">To choose which digit gets drawn, I also feed in the digit's label through two more blocks. 10% of the time I hide the label, so the model also learns to generate without one, which is what guidance needs later.</p>
+
+      <h4>2.5 Training the UNet</h4>
+      <p class="text">The training setup is the same as 2.2, just with the labels added in.</p>
+
+      <figure class="single">
+        <img src="assets/class_loss.png" alt="class-conditioned training loss curve">
+        <figcaption>Training loss</figcaption>
+      </figure>
+
+      <h4>2.6 Sampling from the UNet</h4>
+      <p class="text">I sampled with classifier-free guidance (γ = 5) and 300 steps, generating four of each digit.</p>
+
+      <p class="text">$$u = u_\theta(x_t, t, \varnothing) + \gamma\left[u_\theta(x_t, t, c) - u_\theta(x_t, t, \varnothing)\right]$$</p>
+
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/class_sample_epoch1.png" alt="class-conditioned samples after epoch 1">
+          <figcaption>Epoch 1</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/class_sample_epoch5.png" alt="class-conditioned samples after epoch 5">
+          <figcaption>Epoch 5</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/class_sample_epoch10.png" alt="class-conditioned samples after epoch 10">
+          <figcaption>Epoch 10</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">This time every digit is the one I asked for, even after just one epoch. The epoch 1 digits are a little blotchy, but by epoch 5 they look great.</p>
+
+      <h5>Removing the Learning Rate Scheduler</h5>
+      <p class="text">To get rid of the scheduler, I trained a new model with a constant learning rate of 1e-3 (which is where the scheduler ends up anyway) and kept everything else the same.</p>
+
+      <div class="gallery quad">
+        <figure>
+          <img src="assets/class_no_scheduler_loss.png" alt="constant learning rate training loss curve">
+          <figcaption>Training loss</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/class_no_scheduler_sample_epoch1.png" alt="constant learning rate samples after epoch 1">
+          <figcaption>Epoch 1</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/class_no_scheduler_sample_epoch5.png" alt="constant learning rate samples after epoch 5">
+          <figcaption>Epoch 5</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/class_no_scheduler_sample_epoch10.png" alt="constant learning rate samples after epoch 10">
+          <figcaption>Epoch 10</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">It works just as well! The scheduler starts with a big learning rate that overshoots at first (you can see the huge first spike in the loss and the messier epoch 1 digits), while the smaller constant rate looks clean right from the start. By epochs 5 and 10 the two models look basically the same, so I don't think the scheduler is really needed here. The only downside I noticed is that the loss curve is a bit noisier without it.</p>
+    </section>
+  </main>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      renderMathInElement(document.body, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false }
+        ]
+      });
+    });
+  </script>
+</body>
+</html>
