@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CS180 project 4</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/contrib/auto-render.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>CS180 Proj 4  📸 📸 📸</h1>
+    <p>Image Warping and Mosaicing!</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Part A.1: Shoot the Pictures</h2>
+      <p class="text">To take photos for this project, I used my iPhone camera, capturing the Gateway building and also the grass area outside of Moffitt library. I kept the camera at one fixed spot and only rotated it between shots, since that's what makes the photos in each pair related by a single homography. Between the photos I took, I kept about 50–70% overlap between shots to maximize my results.</p>
+
+      <h3>Gateway</h3>
+      <div class="gallery">
+        <figure>
+          <img src="assets/gateway_1.jpg" alt="gateway left">
+          <figcaption>Left</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gateway_2.jpg" alt="gateway right">
+          <figcaption>Right</figcaption>
+        </figure>
+      </div>
+
+      <h3>Grass</h3>
+      <div class="gallery">
+        <figure>
+          <img src="assets/grass_1.jpg" alt="grass left">
+          <figcaption>Left</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/grass_2.jpg" alt="grass right">
+          <figcaption>Right</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Part A.2: Recover Homographies</h2>
+      <p class="text">For this part, to recover homographies, I clicked on 10 correspondences on the Gateway pair of photos. I made sure to make all my clicks in the same order of both images because computeH pairs them by index, point $i$ in image 1 with point $i$ in image 2, so if the order is off, the equations just pair up points that don't actually match, and the recovered H comes out wrong. I decided to make objects like the security camera on the pillar, chair backs at the counter, the tree top, window frame tops, and the counter edge my points rather than a random spot on the floor or ceiling, since those were harder to match and more unreliable.</p>
+
+      <figure>
+        <img src="assets/gateway_correspondences.png" alt="gateway correspondences">
+        <figcaption>10 correspondences on the Gateway pair</figcaption>
+      </figure>
+
+      <p class="text">H takes each (x, y) point in image 1 and maps it to the matching (x', y') in image 2. Since the bottom-right entry is fixed to 1, there are really only 8 unknowns to solve for. Every correspondence I click gives 2 equations, so with 10 points I end up with a 20 × 8 system, $Ah = b$, more equations than unknowns. I solved that overdetermined system with least squares.</p>
+
+      <p class="text">$$\begin{bmatrix} x & y & 1 & 0 & 0 & 0 & -x x' & -y x' \\ 0 & 0 & 0 & x & y & 1 & -x y' & -y y' \end{bmatrix} \begin{bmatrix} h_1 \\ h_2 \\ \vdots \\ h_8 \end{bmatrix} = \begin{bmatrix} x' \\ y' \end{bmatrix}$$</p>
+
+      <p class="text">The recovered H I got, rounded, was:</p>
+
+      <p class="text">$$H = \begin{bmatrix} 2.0810 & 0.0697 & -3491.73 \\ 0.3796 & 1.6936 & -1061.47 \\ 2.68\times10^{-4} & -8.9\times10^{-6} & 1.00 \end{bmatrix}$$</p>
+    </section>
+
+    <section>
+      <h2>Part A.3: Warp the Images</h2>
+      <p class="text">For inverse warping, I warped the 4 corners through H to get the bounding box, then sent every output pixel back through H⁻¹ to find its source location to leave no holes. Some output pixels land outside the source image though, so I used an alpha mask to mark which output pixels actually have a source pixel; the ones that don't just stay black. Nearest neighbor rounds to the closest pixel, while bilinear takes a distance-weighted average of the 4 surrounding pixels, which smooths out the blocky, stair-stepped edges that nearest neighbor leaves behind.</p>
+
+      <h3>Rectification: iPad</h3>
+      <p class="text">I clicked the iPad's screen corners and mapped them to a 2360 × 1640 rectangle, the iPad Air's actual screen resolution.</p>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/ipad.jpg" alt="ipad original">
+          <figcaption>Original</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/ipad_nn.jpg" alt="ipad rectified nearest neighbor">
+          <figcaption>Nearest neighbor</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/ipad_bilinear.jpg" alt="ipad rectified bilinear">
+          <figcaption>Bilinear</figcaption>
+        </figure>
+      </div>
+
+      <h3>Rectification: Gum</h3>
+      <p class="text">I clicked the gum package's top-face corners and mapped them to a 2400 × 2100 rectangle, matching its actual 4" × 3.5" ratio.</p>
+      <div class="gallery wide">
+        <figure>
+          <img src="assets/gum.jpg" alt="gum original">
+          <figcaption>Original</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gum_nn.jpg" alt="gum rectified nearest neighbor">
+          <figcaption>Nearest neighbor</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gum_bilinear.jpg" alt="gum rectified bilinear">
+          <figcaption>Bilinear</figcaption>
+        </figure>
+      </div>
+
+      <p class="text">Timing-wise, the iPad ran in 1.63s with nearest neighbor and 2.95s with bilinear, while the gum took 4.91s and 9.65s. Bilinear reads 4 pixels per output pixel instead of 1, so it lands at roughly double the runtime for both. The gum pair is slower overall mainly because the output canvas is so much bigger, roughly 6500 × 6600 since the table stretches far into the background, about 3x the pixel count of the iPad canvas, which lines up with it taking about 3x as long. Quality-wise, I had to zoom in to actually see a difference, since at full size the two methods look basically identical. Zoomed in, nearest neighbor shows stair-stepped edges, most obvious on the gum logo's diagonal stripes and a little on the iPad's table lines, while bilinear comes out smooth but a touch softer. So it's speed vs. sharpness: nearest neighbor wins on time, bilinear wins on how clean the result looks.</p>
+      <div class="gallery">
+        <figure>
+          <img src="assets/ipad_nn_zoom.png" alt="ipad nearest neighbor zoomed">
+          <figcaption>iPad table, nearest neighbor (zoomed)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/ipad_bilinear_zoom.png" alt="ipad bilinear zoomed">
+          <figcaption>iPad table, bilinear (zoomed)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gum_nn_zoom.png" alt="gum nearest neighbor zoomed">
+          <figcaption>Gum logo, nearest neighbor (zoomed)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gum_bilinear_zoom.png" alt="gum bilinear zoomed">
+          <figcaption>Gum logo, bilinear (zoomed)</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Part A.4: Blend the Images into a Mosaic</h2>
+      <p class="text">For this part, I kept image 2 fixed and warped image 1 into its frame using bilinear inverse warping. The canvas size comes from image 1's warped corners together with image 2's extent, both at once, not one after the other. Each image gets a weight map that's 1 at its center and falls off linearly to 0 toward the edges (an x falloff times a y falloff), and I warp image 1's weight map right along with it as an extra channel. The final mosaic is just the weighted average, $\Sigma(w_i \cdot I_i) / \Sigma w_i$, so wherever the two images overlap, they blend together instead of one flatly overwriting the other.</p>
+
+      <h3>Gateway</h3>
+      <div class="gallery">
+        <figure>
+          <img src="assets/gateway_1.jpg" alt="gateway left">
+          <figcaption>Left (warped)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gateway_2.jpg" alt="gateway right">
+          <figcaption>Right (reference)</figcaption>
+        </figure>
+      </div>
+      <figure>
+        <img src="assets/gateway_mosaic.jpg" alt="gateway mosaic">
+        <figcaption>Gateway mosaic</figcaption>
+      </figure>
+      <p class="text">There's some ghosting on the near table and chairs, probably from parallax, b/c the camera's center of projection probably shifted slightly between shots, so nearby objects like the table moved more than the background and couldn't be aligned by one homography.</p>
+
+      <h3>Grass</h3>
+      <div class="gallery">
+        <figure>
+          <img src="assets/grass_1.jpg" alt="grass left">
+          <figcaption>Left (warped)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/grass_2.jpg" alt="grass right">
+          <figcaption>Right (reference)</figcaption>
+        </figure>
+      </div>
+      <figure>
+        <img src="assets/grass_mosaic.jpg" alt="grass mosaic">
+        <figcaption>Grass mosaic</figcaption>
+      </figure>
+      <p class="text">There's also some faint ghosting, a doubled outline, in the middle around the trees, because there were fewer sharp features for me to use as points there, even though I aligned points to be as accurate as I could.</p>
+
+      <h3>Memorial Glade</h3>
+      <div class="gallery">
+        <figure>
+          <img src="assets/glade_1.jpg" alt="glade left">
+          <figcaption>Left (warped)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glade_2.jpg" alt="glade right">
+          <figcaption>Right (reference)</figcaption>
+        </figure>
+      </div>
+      <figure>
+        <img src="assets/glade_mosaic.jpg" alt="glade mosaic">
+        <figcaption>Memorial Glade mosaic</figcaption>
+      </figure>
+      <p class="text">The glade mosaic turned out the best of the three because there were many sharp building corners that I could click and use as points. There were some people far back in the glade who moved between the two shots though, so they show up as see-through ghosts in the overlap.</p>
+
+      <p class="text">A challenge I had at first was the clicking for corresponding points because I had to decide areas that are visible for both the first image and second, which took me multiple attempts to find the most optimal points to use for the mosaics.</p>
+    </section>
+  </main>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      renderMathInElement(document.body, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false }
+        ]
+      });
+    });
+  </script>
+</body>
+</html>
