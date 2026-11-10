@@ -179,6 +179,110 @@
 
       <p class="text">A challenge I had at first was the clicking for corresponding points because I had to decide areas that are visible for both the first image and second, which took me multiple attempts to find the most optimal points to use for the mosaics.</p>
     </section>
+
+    <h2>Part B: Feature Matching for Autostitching</h2>
+
+    <section>
+      <h2>Part B.1: Harris Corner Detection</h2>
+      <p class="text">For B.1, I ran harris.py at a single scale, with no sub-pixel refinement, on a grayscale version of the image. I first resized each image to ¼ size before detecting corners, since full-resolution photos give too many corners (ANMS compares every corner against every other one!). I felt like there were a lot of false matches, so to fix those, I implemented thresholding, where I'm keeping only corners that are above 1% of the strongest. For ANMS, each corner's radius is its distance to the nearest significantly stronger corner ($c_{robust} = 0.9$). I kept the 500 corners with the largest radii.</p>
+
+      <div class="gallery">
+        <figure>
+          <img src="assets/glade1_harris_no_threshold.png" alt="harris corners before thresholding">
+          <figcaption>Harris corners (before thresholding)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glade1_harris.png" alt="harris corners without anms">
+          <figcaption>Harris corners after thresholding (without ANMS)</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glade1_anms.png" alt="harris corners with anms">
+          <figcaption>Corners chosen by ANMS</figcaption>
+        </figure>
+      </div>
+      <p class="text">Before thresholding, corners cover nearly the entire image, meaning that they include the weaker and noisier parts too, like the sky. After thresholding, the sky is basically empty (just a few corners on the cloud edges), and the corners stick to textured areas like the trees and pavement. With ANMS, the 500 points spread evenly and mostly landed on real structure like buildings, grass, etc, with only a few on the clouds and none in the open sky. Spreading them out is important b/c crowded corners can miss the overlap between images entirely.</p>
+    </section>
+
+    <section>
+      <h2>Part B.2: Feature Descriptor Extraction</h2>
+      <p class="text">I blurred the grayscale image with a Gaussian (σ = 2.5), then took every 5th pixel of a 40 × 40 window around each corner, giving an 8 × 8 patch. The blur avoids aliasing from that sampling and makes the descriptor more tolerant of small errors in corner position. The patches are axis-aligned, with no rotation. To normalize each one, I subtracted the mean and divided by the standard deviation. This ensures that brightness and contrast differences between photos do not affect the end result.</p>
+
+      <figure>
+        <img src="assets/glade1_descriptors.png" alt="feature descriptors">
+        <figcaption>Normalized 8 × 8 feature descriptors</figcaption>
+      </figure>
+      <p class="text">These 6 patches come from the first 6 ANMS corners, the ones with the largest suppression radius. Each shows clear structure, like edges and corners (even though, at low frequency, they appear more blurry/block-like from sampling).</p>
+    </section>
+
+    <section>
+      <h2>Part B.3: Feature Matching</h2>
+      <p class="text">For each descriptor in image 1, I found its nearest (1-NN) and second-nearest (2-NN) descriptor in image 2 by squared distance, then kept matches where 1-NN / 2-NN < 0.6 (Lowe's ratio test). A ratio works better than plain distance since correct and incorrect matches overlap a lot by raw distance alone, but separate cleanly once you look at the ratio between them. I used brute-force matching instead of any indexing. Each colored line below connects a matched pair.</p>
+
+      <h3>Memorial Glade</h3>
+      <figure>
+        <img src="assets/glade_matches.png" alt="glade matches">
+        <figcaption>Memorial Glade matches</figcaption>
+      </figure>
+
+      <h3>Gateway</h3>
+      <figure>
+        <img src="assets/gateway_matches.png" alt="gateway matches">
+        <figcaption>Gateway matches</figcaption>
+      </figure>
+
+      <h3>Grass</h3>
+      <figure>
+        <img src="assets/grass_matches.png" alt="grass matches">
+        <figcaption>Grass matches</figcaption>
+      </figure>
+      <p class="text">Glade and grass both have mostly parallel lines, showing a consistent shift between the photos. Gateway has the most crossing lines, since the repeated window frames and identical chairs and tables look alike, so some features matched the wrong copy. Every pair still has a few outlier lines too, like the long diagonals from the railing in glade and from the ceiling and floor in gateway. Using RANSAC in the next part definitely helped with this.</p>
+    </section>
+
+    <section>
+      <h2>Part B.4: RANSAC for Robust Homography</h2>
+      <p class="text">I picked 4 random matches, computed H with my Part A computeH, and counted inliers, matches where H lands within eps pixels of the actual match. I kept the H with the most inliers over 1000 iterations, then recomputed H using all of its inliers. 4 points is the minimum needed since a homography has 8 unknowns and each match gives 2 equations. Since matches were found at ¼ size, I scaled the points by 4 to build the mosaics at full resolution, used eps = 8 full-size pixels, and reused Part A's bilinear warping and feathered blending unchanged.</p>
+
+      <h3>Gateway</h3>
+      <div class="gallery">
+        <figure>
+          <img src="assets/gateway_mosaic.jpg" alt="gateway manual mosaic">
+          <figcaption>Manual</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/gateway_auto_mosaic.jpg" alt="gateway automatic mosaic">
+          <figcaption>Automatic</figcaption>
+        </figure>
+      </div>
+      <p class="text">The manual mosaic has clear ghosting on the middle table and chairs, doubled legs and a see-through copy of the chair, while the automatic one is nearly clean there.</p>
+
+      <h3>Grass</h3>
+      <div class="gallery">
+        <figure>
+          <img src="assets/grass_mosaic.jpg" alt="grass manual mosaic">
+          <figcaption>Manual</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/grass_auto_mosaic.jpg" alt="grass automatic mosaic">
+          <figcaption>Automatic</figcaption>
+        </figure>
+      </div>
+      <p class="text">The manual mosaic has a faint blur of some kind with the objects in the frame, while the automatic one looks cleaner. Honestly, I didn't see a difference with the people walking between the 2 images, maybe because they're already kinda far away in the frame. In Part A I said the grass had few sharp features to click, but automatic matching was able to find many matches across the trees and grass. I think it's better than the human eye in terms of optimizing point selection.</p>
+
+      <h3>Memorial Glade</h3>
+      <div class="gallery">
+        <figure>
+          <img src="assets/glade_mosaic.jpg" alt="glade manual mosaic">
+          <figcaption>Manual</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/glade_auto_mosaic.jpg" alt="glade automatic mosaic">
+          <figcaption>Automatic</figcaption>
+        </figure>
+      </div>
+      <p class="text">The manual and automatic mosaics look almost equally clean here, since this was already my best manual mosaic (the sharp building corners helped with this). Moving people still show up as see-through ghosts in both versions, but that makes sense because a homography can't fix something that moves between shots.</p>
+
+      <p class="text">In general, I noticed that automatic stitching was as good as or better than manual for all 3 pairs. It uses many inliers spread across the overlap instead of my 10 hand clicks, and RANSAC removes the bad ones. The biggest thing I learned was how much better the ratio test is than plain distance, and how much bad matching RANSAC can tolerate. The main challenge is that it can't handle anything that moves between shots, like people.</p>
+    </section>
   </main>
 
   <script>
